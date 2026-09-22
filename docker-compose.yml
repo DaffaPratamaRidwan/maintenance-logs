@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine3.23
+    container_name: factory_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pass123456
+      POSTGRES_DB: maintenance_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d maintenance_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - factory_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: factory_backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgres://postgres:pass123456@db:5432/maintenance_db
+      JWT_SECRET: factory_super_secret_jwt_2026
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - factory_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: factory_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NUXT_PUBLIC_API_BASE: http://192.168.11.30:4000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - factory_network
+
+volumes:
+  postgres_data:
+
+networks:
+  factory_network:
+    driver: bridge

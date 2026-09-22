@@ -375,13 +375,14 @@ app.patch('/api/users/:id/status', authenticate, requireRole(['admin']), async (
 });
 
 // Health check endpoint untuk Docker & Jenkins
-app.get('/health', (c) => c.text('OK'));
+app.get('/health', (c) => {
+  return c.text('OK', 200);
+});
 
 const port = Number(process.env.PORT) || 4000;
 
 serve({
-  fetch: app.fetch,
+  fetch: app.fetch, 
   port,
-}, (info) => {
-  console.log(`Server Hono is running on http://localhost:${info.port}`);
-});
+  hostname: '0.0.0.0',
+}
