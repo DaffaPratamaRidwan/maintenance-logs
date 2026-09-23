@@ -350,8 +350,10 @@ app.post('/api/users', authenticate, requireRole(['admin']), async (c) => {
       [username.trim(), hash, role]
     );
     return c.json(res.rows[0], 201);
-  } catch (err: any) {
-    if (err.code === '23505') return c.json({ error: 'Username already exists' }, 409);
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === '23505') {
+      return c.json({ error: 'Username already exists' }, 409);
+    }
     return c.json({ error: 'Failed to create user' }, 500);
   }
 });
@@ -359,6 +361,8 @@ app.post('/api/users', authenticate, requireRole(['admin']), async (c) => {
 app.patch('/api/users/:id/status', authenticate, requireRole(['admin']), async (c) => {
   const user = c.get('user');
   const id = parseInt(c.req.param('id'), 10);
+  if (isNaN(id)) return c.json({ error: 'Invalid user ID' }, 400);
+
   const body = await c.req.json().catch(() => null);
   const is_active = body?.is_active;
 
@@ -374,10 +378,62 @@ app.patch('/api/users/:id/status', authenticate, requireRole(['admin']), async (
   return c.json(res.rows[0]);
 });
 
-// Health check endpoint untuk Docker & Jenkins
-app.get('/health', (c) => {
-  return c.text('OK', 200);
+app.patch('/api/users/:id/role', authenticate, requireRole(['admin']), async (c) => {
+  const currentUser = c.get('user');
+  const targetId = parseInt(c.req.param('id'), 10);
+  if (isNaN(targetId)) return c.json({ error: 'Invalid user ID' }, 400);
+
+  if (currentUser.id === targetId) {
+    return c.json({ error: 'Forbidden: You cannot change your own role' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const { role } = body || {};
+  if (!['operator', 'supervisor', 'admin'].includes(role)) {
+    return c.json({ error: 'Invalid role. Must be operator, supervisor, or admin' }, 400);
+  }
+
+  const res = await pool.query(
+    'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, username, role, is_active',
+    [role, targetId]
+  );
+  if (res.rowCount === 0) return c.json({ error: 'User not found' }, 404);
+
+  return c.json(res.rows[0]);
 });
+
+app.delete('/api/users/:id', authenticate, requireRole(['admin']), async (c) => {
+  const currentUser = c.get('user');
+  const targetId = parseInt(c.req.param('id'), 10);
+  if (isNaN(targetId)) return c.json({ error: 'Invalid user ID' }, 400);
+
+  if (currentUser.id === targetId) {
+    return c.json({ error: 'Forbidden: You cannot delete your own account' }, 403);
+  }
+
+  const userCheck = await pool.query('SELECT id, username FROM users WHERE id = $1', [targetId]);
+  if (userCheck.rowCount === 0) return c.json({ error: 'User not found' }, 404);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Amankan foreign key referensi tiket sebelum user dihapus agar riwayat tiket tetap utuh
+    await client.query('UPDATE maintenance_requests SET created_by = NULL WHERE created_by = $1', [targetId]);
+    await client.query('UPDATE maintenance_requests SET reviewed_by = NULL WHERE reviewed_by = $1', [targetId]);
+    await client.query('DELETE FROM users WHERE id = $1', [targetId]);
+    await client.query('COMMIT');
+    return c.json({ message: 'User deleted successfully', id: targetId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting user:', err);
+    return c.json({ error: 'Failed to delete user' }, 500);
+  } finally {
+    client.release();
+  }
+});
+
+// Health check endpoint untuk Docker & Jenkins
+app.get('/health', (c) => c.text('OK'));
 
 const port = Number(process.env.PORT) || 4000;
 
@@ -385,4 +441,4 @@ serve({
   fetch: app.fetch, 
   port,
   hostname: '0.0.0.0',
-}
+})

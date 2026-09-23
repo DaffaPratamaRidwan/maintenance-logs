@@ -4,7 +4,7 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://192.168.11.30:4000',
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:4000',
     },
   },
   // Memastikan kompatibilitas runtime penuh Nuxt 4

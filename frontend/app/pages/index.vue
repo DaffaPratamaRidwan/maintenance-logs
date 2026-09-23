@@ -163,12 +163,16 @@
                   </span>
                 </td>
                 <td class="p-3.5">
-                  <span class="text-white font-medium">{{ req.created_by_username || 'User #' + req.created_by }}</span>
+                  <span class="text-white font-medium">{{ req.created_by_username || (req.created_by ? 'User #' + req.created_by : 'Akun Terhapus') }}</span>
                   <div class="text-[10px] text-slate-500">{{ new Date(req.created_at).toLocaleDateString() }}</div>
                 </td>
                 <td class="p-3.5">
                   <div v-if="req.reviewed_by_username">
                     <span class="text-slate-200">{{ req.reviewed_by_username }}</span>
+                    <div class="text-[10px] text-slate-500">{{ new Date(req.reviewed_at).toLocaleDateString() }}</div>
+                  </div>
+                  <div v-else-if="req.reviewed_at">
+                    <span class="text-slate-400 italic">Akun Terhapus</span>
                     <div class="text-[10px] text-slate-500">{{ new Date(req.reviewed_at).toLocaleDateString() }}</div>
                   </div>
                   <span v-else class="text-slate-600 italic">Belum direview</span>
@@ -269,15 +273,43 @@
             <tbody class="divide-y divide-slate-800">
               <tr v-for="u in usersList" :key="u.id">
                 <td class="p-3 text-slate-500 font-mono">#{{ u.id }}</td>
-                <td class="p-3 text-white font-medium">{{ u.username }}</td>
-                <td class="p-3 uppercase text-[10px]">{{ u.role }}</td>
+                <td class="p-3 text-white font-medium">
+                  {{ u.username }}
+                  <span v-if="user && u.id === user.id" class="ml-1 text-[10px] text-purple-400 font-normal">(Anda)</span>
+                </td>
+                <td class="p-3">
+                  <!-- Dropdown Ubah Role -->
+                  <select
+                    :value="u.role"
+                    :disabled="user && u.id === user.id"
+                    @change="updateUserRole(u.id, u.username, ($event.target as HTMLSelectElement).value)"
+                    class="bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <option value="operator">Operator</option>
+                    <option value="supervisor">Supervisor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </td>
                 <td class="p-3">
                   <span :class="u.is_active ? 'text-emerald-400' : 'text-rose-400'">{{ u.is_active ? 'Aktif' : 'Non-aktif' }}</span>
                 </td>
-                <td class="p-3 text-right">
-                  <button @click="toggleUserActive(u.id, !u.is_active)" class="text-xs hover:underline" :class="u.is_active ? 'text-rose-400' : 'text-emerald-400'">
-                    {{ u.is_active ? 'Deactivate' : 'Activate' }}
-                  </button>
+                <td class="p-3 text-right space-x-2">
+                  <template v-if="user && u.id !== user.id">
+                    <button 
+                      @click="toggleUserActive(u.id, !u.is_active)" 
+                      class="text-xs hover:underline" 
+                      :class="u.is_active ? 'text-rose-400' : 'text-emerald-400'"
+                    >
+                      {{ u.is_active ? 'Deactivate' : 'Activate' }}
+                    </button>
+                    <button
+                      @click="deleteUser(u.id, u.username)"
+                      class="text-xs text-rose-400 hover:text-rose-300 font-semibold hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </template>
+                  <span v-else class="text-xs text-slate-600 italic">Akun aktif saat ini</span>
                 </td>
               </tr>
             </tbody>
@@ -482,6 +514,38 @@ const toggleUserActive = async (id: number, is_active: boolean) => {
     await loadUsers();
   } catch (err: any) {
     notify(err.message, 'error');
+  }
+};
+
+const updateUserRole = async (id: number, username: string, newRole: string) => {
+  if (!confirm(`Ubah role pengguna "${username}" menjadi ${newRole}?`)) {
+    await loadUsers();
+    return;
+  }
+  try {
+    await fetchApi(`/api/users/${id}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role: newRole }),
+    });
+    notify(`Role pengguna "${username}" berhasil diubah menjadi ${newRole}`);
+    await loadUsers();
+  } catch (err: any) {
+    notify('Gagal mengubah role: ' + err.message, 'error');
+    await loadUsers();
+  }
+};
+
+const deleteUser = async (id: number, username: string) => {
+  if (!confirm(`Hapus user "${username}" secara permanen? Riwayat tiket perawatan yang terkait akan tetap tersimpan.`)) return;
+  try {
+    await fetchApi(`/api/users/${id}`, {
+      method: 'DELETE',
+    });
+    notify(`Pengguna "${username}" berhasil dihapus`);
+    await loadUsers();
+    await loadRequests();
+  } catch (err: any) {
+    notify('Gagal menghapus pengguna: ' + err.message, 'error');
   }
 };
 
