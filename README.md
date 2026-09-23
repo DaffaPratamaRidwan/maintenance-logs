@@ -204,5 +204,7 @@ The system automatically provisions pre-configured evaluator accounts upon first
 ## Here is a brief summary of how AI was utilized during development:
   │
   │ 1. Tools & Scope: I used Gemini Gemini 3.8 Flash, I utilized an AI coding assistant primarily for scaffolding repetitive boilerplate code—such as standard Hono route signatures, mock industrial equipment seed data, multi-stage Dockerfile templates, and responsive Tailwind CSS layout classes for the dashboard tables.
+
   │ 2. Division of Work: I leveraged AI for mechanical, repetitive tasks to maintain high delivery velocity. In contrast, core architectural decisions, data integrity rules, and security boundaries were designed and written by hand—specifically real-time database role verification on every request (to eliminate stale JWT claim risks) and hardcoded server-side guards preventing admins from deleting or demoting their own active sessions.
+  
   │ 3. Rejected/Rewritten Case: When implementing the user deletion endpoint (DELETE /api/users/:id), the AI initially proposed a direct DELETE FROM users WHERE id = $1. I rejected this because the database schema had an ON DELETE CASCADE rule on maintenance_requests, which would have wiped out historical machine logs. In an industrial maintenance context, preserving the audit trail is non-negotiable. I re-architected it using a database transaction (BEGIN ... COMMIT) to safely nullify user references on tickets before deleting the user row, accompanied by graceful UI fallback handling ("Deleted Account").
