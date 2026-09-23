@@ -132,7 +132,7 @@ The system automatically provisions pre-configured evaluator accounts upon first
 ```
 +-----------------------------------------------------------------------+
 |                             Client Browser                            |
-|       Nuxt 3/4 + Vue 3 Composition API + Tailwind CSS + Vue Router    |
+|       Nuxt 4 + Vue 3 Composition API + Tailwind CSS + Vue Router    |
 +-----------------------------------+-----------------------------------+
                                     | HTTP / REST (JWT Bearer Token)
                                     v
@@ -194,17 +194,15 @@ The system automatically provisions pre-configured evaluator accounts upon first
 
 ## 4. Known Limitations & Future Considerations
 
-1. **Token Blacklist Table Cleanup**:
-   - The `revoked_tokens` table stores expired token hashes with an `expires_at` column.
-   - Currently, old rows are not automatically purged. In production, a scheduled cron task or pg_cron worker (`DELETE FROM revoked_tokens WHERE expires_at < NOW()`) should be added to avoid unbounded table growth over time.
-
-2. **Client-Side Auth Storage (`localStorage`)**:
+1. **Client-Side Auth Storage (`localStorage`)**:
    - The frontend stores JWTs in browser `localStorage`.
    - While standard for many single-page applications, storing tokens in `httpOnly` secure cookies with CSRF protection is recommended for enterprise environments to safeguard against cross-site scripting (XSS).
 
-3. **Single Database Node**:
-   - The current setup uses a single PostgreSQL container with standard Docker volume persistence.
-   - For high availability and write-heavy telemetry scenarios, connection poolers such as **PgBouncer** and read-replicas can be added.
-
-4. **Single-Device vs. Global Session Invalidation**:
+2. **Single-Device vs. Global Session Invalidation**:
    - Logging out invalidates only the current token. If a user is logged in on multiple browsers and one is revoked, other active tokens remain valid until either the token expires or the user account is explicitly deactivated or modified in role.
+
+## Here is a brief summary of how AI was utilized during development:
+  │
+  │ 1. Tools & Scope: I used Gemini Gemini 3.8 Flash, I utilized an AI coding assistant primarily for scaffolding repetitive boilerplate code—such as standard Hono route signatures, mock industrial equipment seed data, multi-stage Dockerfile templates, and responsive Tailwind CSS layout classes for the dashboard tables.
+  │ 2. Division of Work: I leveraged AI for mechanical, repetitive tasks to maintain high delivery velocity. In contrast, core architectural decisions, data integrity rules, and security boundaries were designed and written by hand—specifically real-time database role verification on every request (to eliminate stale JWT claim risks) and hardcoded server-side guards preventing admins from deleting or demoting their own active sessions.
+  │ 3. Rejected/Rewritten Case: When implementing the user deletion endpoint (DELETE /api/users/:id), the AI initially proposed a direct DELETE FROM users WHERE id = $1. I rejected this because the database schema had an ON DELETE CASCADE rule on maintenance_requests, which would have wiped out historical machine logs. In an industrial maintenance context, preserving the audit trail is non-negotiable. I re-architected it using a database transaction (BEGIN ... COMMIT) to safely nullify user references on tickets before deleting the user row, accompanied by graceful UI fallback handling ("Deleted Account").
