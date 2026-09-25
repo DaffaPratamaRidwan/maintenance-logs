@@ -1,31 +1,41 @@
 export const useApi = () => {
   const config = useRuntimeConfig();
-  const apiBase = config.public.apiBase as string;
+  // Di Nuxt 4, useCookie dapat diakses langsung secara universal (SSR & Client)
+  const token = useCookie('auth_token');
+  const apiBase = (config.public.apiBase as string) || 'http://localhost:4000';
 
-  const fetchApi = async (endpoint: string, options: any = {}) => {
-    const token = process.client ? localStorage.getItem('auth_token') : null;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
+  /**
+   * Wrapper $fetch terotentikasi yang kompatibel dengan Nuxt 4 dan Hono backend.
+   * Otomatis menyematkan Authorization Bearer token dan menangani parsing error Hono.
+   */
+  const fetchWithAuth = async (
+    endpoint: string,
+    options: Parameters[1] = {}
+  ): Promise => {
+    const headers: Record = {
+      ...(options.headers as Record || {}),
     };
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (token.value) {
+      headers['Authorization'] = `Bearer ${token.value}`;
     }
 
-    const res = await fetch(`${apiBase}${endpoint}`, {
-      ...options,
-      headers,
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || `HTTP error! Status: ${res.status}`);
+    try {
+      return await $fetch(endpoint, {
+        baseURL: apiBase,
+        ...options,
+        headers,
+      });
+    } catch (err: any) {
+      // Backend Hono mengirimkan error payload { message: '...' }
+      const serverMessage = err.data?.message || err.data?.error || err.message;
+      throw new Error(serverMessage || `Request failed with status ${err.status || 500}`);
     }
-
-    return res.json();
   };
 
-  return { fetchApi, apiBase };
+  return {
+    fetchWithAuth,
+    fetchApi: fetchWithAuth, // Alias agar kode yang memanggil fetchApi maupun fetchWithAuth tetap berjalan
+    apiBase,
+  };
 };

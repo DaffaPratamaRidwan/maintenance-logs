@@ -7,7 +7,9 @@ dotenv.config();
 const { Pool } = pg;
 
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString:
+    process.env.DATABASE_URL ||
+    'postgres://postgres:pass123456@localhost:5432/maintenancedb',
   max: 15,
   idleTimeoutMillis: 30000,
 });
@@ -15,7 +17,7 @@ export const pool = new Pool({
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function initDB(retries = 10, delay = 2000) {
-  // Retry loop untuk mencegah crash saat PostgreSQL container sedang booting
+  // Retry loop untuk mencegah crash saat kontainer database sedang booting
   while (retries > 0) {
     try {
       await pool.query('SELECT 1');
@@ -33,7 +35,7 @@ export async function initDB(retries = 10, delay = 2000) {
   }
 
   try {
-    // 1. Tabel Users
+    // 1. Tabel Users (3 Role, is_active flag)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -64,7 +66,7 @@ export async function initDB(retries = 10, delay = 2000) {
       CREATE INDEX IF NOT EXISTS idx_requests_created_by ON maintenance_requests(created_by);
     `);
 
-    // 3. Tabel Server-Side Token Blacklist (untuk Revocation Logout)
+    // 3. Tabel Token Revocation (Logout Guard)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS revoked_tokens (
         id SERIAL PRIMARY KEY,
@@ -75,24 +77,26 @@ export async function initDB(retries = 10, delay = 2000) {
       CREATE INDEX IF NOT EXISTS idx_revoked_tokens_hash ON revoked_tokens(token_hash);
     `);
 
-    // 4. Auto Seeding Data Uji Coba Evaluator
+    // 4. Auto Seeding Data Siap Uji Evaluator (1 akun per role)
     const userCount = await pool.query('SELECT COUNT(*) FROM users');
     if (parseInt(userCount.rows[0].count, 10) === 0) {
       console.log('Seeding initial data for evaluators...');
       const salt = await bcrypt.genSalt(10);
       const defaultPasswordHash = await bcrypt.hash('password123', salt);
 
+      // Seed 3 akun role standar
       const seededUsers = await pool.query(`
         INSERT INTO users (username, password_hash, role) VALUES
         ('operator1', $1, 'operator'),
         ('supervisor1', $1, 'supervisor'),
-        ('admin1', $1, 'admin')
+        ('admin', $1, 'admin')
         RETURNING id, username, role;
       `, [defaultPasswordHash]);
 
       const opId = seededUsers.rows.find((u) => u.role === 'operator').id;
       const supId = seededUsers.rows.find((u) => u.role === 'supervisor').id;
 
+      // Seed variasi status request (Submitted, Approved, Rejected)
       await pool.query(`
         INSERT INTO maintenance_requests (asset_id, description, priority, status, created_by, reviewed_by, reviewed_at) VALUES
         ('CNC-MILL-01', 'Spindle mengalami panas berlebih saat cycle run', 'high', 'Submitted', $1, NULL, NULL),

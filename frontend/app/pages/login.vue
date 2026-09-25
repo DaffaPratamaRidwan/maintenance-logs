@@ -13,7 +13,7 @@
             v-model="username"
             type="text"
             required
-            placeholder="e.g. operator1, supervisor1, admin1"
+            placeholder="e.g. operator1, supervisor1, admin"
             class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -55,7 +55,7 @@
             <span>Pass: <code class="text-blue-400">password123</code></span>
           </div>
           <div class="flex justify-between bg-slate-950 p-2 rounded border border-slate-800">
-            <span>Admin: <strong class="text-slate-200">admin1</strong></span>
+            <span>Admin: <strong class="text-slate-200">admin</strong></span>
             <span>Pass: <code class="text-blue-400">password123</code></span>
           </div>
         </div>
@@ -66,6 +66,11 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+
+// Proteksi rute agar user yang sudah login tidak bisa membuka halaman login lagi
+definePageMeta({
+  middleware: 'auth',
+});
 
 const username = ref('');
 const password = ref('');
@@ -80,22 +85,20 @@ const handleLogin = async () => {
   errorMessage.value = '';
 
   try {
-    const res = await fetch(`${apiBase}/api/auth/login`, {
+    const data: any = await $fetch('/api/auth/login', {
+      baseURL: apiBase,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: username.value,
+      body: {
+        username: username.value.trim(),
         password: password.value,
-      }),
+      },
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Autentikasi gagal');
-
     setAuth(data.token, data.user);
-    navigateTo('/');
+    await navigateTo('/');
   } catch (err: any) {
-    errorMessage.value = err.message;
+    // Menangkap pesan error dari properti 'message' Hono
+    errorMessage.value = err.data?.message || err.message || 'Autentikasi gagal, silakan periksa kredensial Anda.';
   } finally {
     loading.value = false;
   }

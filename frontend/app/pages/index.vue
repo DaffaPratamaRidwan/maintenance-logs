@@ -72,7 +72,7 @@
             <button
               type="submit"
               :disabled="submitting"
-              class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition"
+              class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition disabled:opacity-50"
             >
               {{ submitting ? 'Mengirim...' : '+ Ajukan Request' }}
             </button>
@@ -86,7 +86,6 @@
           <div class="w-full md:w-72">
             <input
               v-model="searchQuery"
-              @input="debounceSearch"
               placeholder="Cari asset ID / deskripsi..."
               class="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
@@ -95,7 +94,7 @@
           <div class="flex items-center space-x-3">
             <select
               v-model="filterStatus"
-              @change="applyFilter"
+              @change="loadRequests"
               class="bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none"
             >
               <option value="">Semua Status</option>
@@ -106,7 +105,7 @@
 
             <select
               v-model="filterPriority"
-              @change="applyFilter"
+              @change="loadRequests"
               class="bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none"
             >
               <option value="">Semua Prioritas</option>
@@ -132,7 +131,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
-              <tr v-for="req in requests" :key="req.id" class="hover:bg-slate-800/30">
+              <tr v-for="req in paginatedRequests" :key="req.id" class="hover:bg-slate-800/30">
                 <td class="p-3.5">
                   <div class="font-bold text-white">{{ req.asset_id }}</div>
                   <div class="text-[10px] text-slate-500">Req #{{ req.id }}</div>
@@ -163,12 +162,12 @@
                   </span>
                 </td>
                 <td class="p-3.5">
-                  <span class="text-white font-medium">{{ req.created_by_username || (req.created_by ? 'User #' + req.created_by : 'Akun Terhapus') }}</span>
+                  <span class="text-white font-medium">{{ req.creator_name || (req.created_by ? 'User #' + req.created_by : 'Akun Terhapus') }}</span>
                   <div class="text-[10px] text-slate-500">{{ new Date(req.created_at).toLocaleDateString() }}</div>
                 </td>
                 <td class="p-3.5">
-                  <div v-if="req.reviewed_by_username">
-                    <span class="text-slate-200">{{ req.reviewed_by_username }}</span>
+                  <div v-if="req.reviewer_name">
+                    <span class="text-slate-200">{{ req.reviewer_name }}</span>
                     <div class="text-[10px] text-slate-500">{{ new Date(req.reviewed_at).toLocaleDateString() }}</div>
                   </div>
                   <div v-else-if="req.reviewed_at">
@@ -180,23 +179,21 @@
 
                 <td class="p-3.5 text-right space-x-2">
                   <button
-                    v-if="(user?.role === 'admin') || (req.created_by === user?.id && req.status === 'Submitted')"
+                    v-if="(isAdmin) || (req.created_by === user?.id && req.status === 'Submitted')"
                     @click="openEditModal(req)"
                     class="text-blue-400 hover:text-blue-300 font-medium"
                   >
                     Edit
                   </button>
 
-                  <template v-if="user?.role === 'supervisor' || user?.role === 'admin'">
+                  <template v-if="canReview && req.status === 'Submitted'">
                     <button
-                      v-if="req.status !== 'Approved'"
                       @click="reviewRequest(req.id, 'Approved')"
                       class="text-emerald-400 hover:text-emerald-300 font-medium"
                     >
                       Approve
                     </button>
                     <button
-                      v-if="req.status !== 'Rejected'"
                       @click="reviewRequest(req.id, 'Rejected')"
                       class="text-amber-400 hover:text-amber-300 font-medium"
                     >
@@ -205,7 +202,7 @@
                   </template>
 
                   <button
-                    v-if="user?.role === 'admin'"
+                    v-if="isAdmin"
                     @click="deleteRequest(req.id)"
                     class="text-rose-400 hover:text-rose-300 font-medium"
                   >
@@ -213,7 +210,7 @@
                   </button>
                 </td>
               </tr>
-              <tr v-if="requests.length === 0">
+              <tr v-if="filteredRequests.length === 0">
                 <td colspan="7" class="p-8 text-center text-slate-500">Tidak ada catatan request yang sesuai.</td>
               </tr>
             </tbody>
@@ -223,20 +220,20 @@
         <!-- Pagination Controls -->
         <div class="p-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
           <div>
-            Halaman <span class="text-white font-semibold">{{ pagination.page }}</span> dari <span class="text-white font-semibold">{{ pagination.total_pages || 1 }}</span> 
-            (Total {{ pagination.total }} records)
+            Halaman <span class="text-white font-semibold">{{ currentPage }}</span> dari <span class="text-white font-semibold">{{ totalPages }}</span> 
+            (Total {{ filteredRequests.length }} records)
           </div>
           <div class="space-x-2">
             <button
-              :disabled="pagination.page <= 1"
-              @click="changePage(pagination.page - 1)"
+              :disabled="currentPage <= 1"
+              @click="currentPage--"
               class="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded text-slate-300 hover:bg-slate-800 disabled:opacity-30"
             >
               &larr; Prev
             </button>
             <button
-              :disabled="pagination.page >= pagination.total_pages"
-              @click="changePage(pagination.page + 1)"
+              :disabled="currentPage >= totalPages"
+              @click="currentPage++"
               class="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded text-slate-300 hover:bg-slate-800 disabled:opacity-30"
             >
               Next &rarr;
@@ -246,7 +243,7 @@
       </section>
 
       <!-- 3. Panel Khusus Admin -->
-      <section v-if="user?.role === 'admin'" class="bg-slate-900 border border-purple-900/40 rounded-xl p-5 shadow-sm space-y-4">
+      <section v-if="isAdmin" class="bg-slate-900 border border-purple-900/40 rounded-xl p-5 shadow-sm space-y-4">
         <h2 class="text-sm font-semibold text-purple-400 uppercase tracking-wider">Admin Panel: Manajemen Pengguna</h2>
         <form @submit.prevent="createUser" class="grid grid-cols-1 md:grid-cols-4 gap-3">
           <input v-model="newUser.username" required placeholder="Username baru" class="px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white" />
@@ -351,12 +348,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 
 definePageMeta({ middleware: 'auth' });
 
-const { fetchApi } = useApi();
-const { user, initAuth, logout } = useAuth();
+const { fetchWithAuth } = useApi();
+const { user, logout, isAdmin, canReview } = useAuth();
 
 const requests = ref<any[]>([]);
 const usersList = ref<any[]>([]);
@@ -366,7 +363,8 @@ const searchQuery = ref('');
 const submitting = ref(false);
 const editingReq = ref<any | null>(null);
 
-let searchTimeout: any = null;
+const currentPage = ref(1);
+const pageSize = 10;
 
 const toast = ref({ show: false, message: '', type: 'success' });
 const notify = (message: string, type: 'success' | 'error' = 'success') => {
@@ -374,50 +372,48 @@ const notify = (message: string, type: 'success' | 'error' = 'success') => {
   setTimeout(() => { toast.value.show = false; }, 3500);
 };
 
-const pagination = ref({ page: 1, limit: 10, total: 0, total_pages: 1 });
-
 const newReq = ref({ asset_id: '', description: '', priority: 'medium' });
 const newUser = ref({ username: '', password: '', role: 'operator' });
 
+// Request Management
 const loadRequests = async () => {
   try {
-    let query = `?page=${pagination.value.page}&limit=${pagination.value.limit}&`;
-    if (filterStatus.value) query += `status=${filterStatus.value}&`;
-    if (filterPriority.value) query += `priority=${filterPriority.value}&`;
-    if (searchQuery.value.trim()) query += `search=${encodeURIComponent(searchQuery.value.trim())}&`;
+    const params = new URLSearchParams();
+    if (filterStatus.value) params.append('status', filterStatus.value);
+    if (filterPriority.value) params.append('priority', filterPriority.value);
 
-    const res = await fetchApi(`/api/requests${query}`);
-    requests.value = res.data;
-    pagination.value = res.meta;
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetchWithAuth(`/api/requests${query}`);
+    requests.value = Array.isArray(res) ? res : (res.data || []);
   } catch (err: any) {
     notify('Gagal memuat requests: ' + err.message, 'error');
   }
 };
 
-const debounceSearch = () => {
-  clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => {
-    pagination.value.page = 1;
-    loadRequests();
-  }, 350);
-};
+const filteredRequests = computed(() => {
+  if (!searchQuery.value.trim()) return requests.value;
+  const q = searchQuery.value.toLowerCase();
+  return requests.value.filter(
+    (r) =>
+      r.asset_id?.toLowerCase().includes(q) ||
+      r.description?.toLowerCase().includes(q) ||
+      r.creator_name?.toLowerCase().includes(q)
+  );
+});
 
-const applyFilter = () => {
-  pagination.value.page = 1;
-  loadRequests();
-};
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredRequests.value.length / pageSize)));
 
-const changePage = (newPage: number) => {
-  pagination.value.page = newPage;
-  loadRequests();
-};
+const paginatedRequests = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredRequests.value.slice(start, start + pageSize);
+});
 
 const createRequest = async () => {
   submitting.value = true;
   try {
-    await fetchApi('/api/requests', {
+    await fetchWithAuth('/api/requests', {
       method: 'POST',
-      body: JSON.stringify(newReq.value),
+      body: newReq.value,
     });
     newReq.value = { asset_id: '', description: '', priority: 'medium' };
     notify('Request maintenance berhasil diajukan');
@@ -436,13 +432,13 @@ const openEditModal = (req: any) => {
 const saveEditRequest = async () => {
   if (!editingReq.value) return;
   try {
-    await fetchApi(`/api/requests/${editingReq.value.id}`, {
+    await fetchWithAuth(`/api/requests/${editingReq.value.id}`, {
       method: 'PUT',
-      body: JSON.stringify({
+      body: {
         asset_id: editingReq.value.asset_id,
         description: editingReq.value.description,
         priority: editingReq.value.priority,
-      }),
+      },
     });
     editingReq.value = null;
     notify('Perubahan tiket berhasil disimpan');
@@ -454,9 +450,9 @@ const saveEditRequest = async () => {
 
 const reviewRequest = async (id: number, status: 'Approved' | 'Rejected') => {
   try {
-    await fetchApi(`/api/requests/${id}/review`, {
+    await fetchWithAuth(`/api/requests/${id}/review`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: { status },
     });
     notify(`Status tiket diubah menjadi ${status}`);
     await loadRequests();
@@ -468,7 +464,7 @@ const reviewRequest = async (id: number, status: 'Approved' | 'Rejected') => {
 const deleteRequest = async (id: number) => {
   if (!confirm('Hapus request ini secara permanen?')) return;
   try {
-    await fetchApi(`/api/requests/${id}`, { method: 'DELETE' });
+    await fetchWithAuth(`/api/requests/${id}`, { method: 'DELETE' });
     notify('Request berhasil dihapus');
     await loadRequests();
   } catch (err: any) {
@@ -477,20 +473,14 @@ const deleteRequest = async (id: number) => {
 };
 
 const handleLogout = async () => {
-  try {
-    await fetchApi('/api/auth/logout', { method: 'POST' });
-  } catch {
-    // Abaikan jika token kedaluwarsa
-  } finally {
-    logout();
-  }
+  await logout();
 };
 
 // Admin Panel Methods
 const loadUsers = async () => {
-  if (user.value?.role !== 'admin') return;
+  if (!isAdmin.value) return;
   try {
-    usersList.value = await fetchApi('/api/users');
+    usersList.value = await fetchWithAuth('/api/users');
   } catch (err: any) {
     notify('Gagal memuat user: ' + err.message, 'error');
   }
@@ -498,7 +488,7 @@ const loadUsers = async () => {
 
 const createUser = async () => {
   try {
-    await fetchApi('/api/users', { method: 'POST', body: JSON.stringify(newUser.value) });
+    await fetchWithAuth('/api/users', { method: 'POST', body: newUser.value });
     newUser.value = { username: '', password: '', role: 'operator' };
     notify('Pengguna baru berhasil dibuat');
     await loadUsers();
@@ -509,7 +499,7 @@ const createUser = async () => {
 
 const toggleUserActive = async (id: number, is_active: boolean) => {
   try {
-    await fetchApi(`/api/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ is_active }) });
+    await fetchWithAuth(`/api/users/${id}/status`, { method: 'PATCH', body: { is_active } });
     notify('Status user berhasil diubah');
     await loadUsers();
   } catch (err: any) {
@@ -523,9 +513,9 @@ const updateUserRole = async (id: number, username: string, newRole: string) => 
     return;
   }
   try {
-    await fetchApi(`/api/users/${id}/role`, {
+    await fetchWithAuth(`/api/users/${id}/role`, {
       method: 'PATCH',
-      body: JSON.stringify({ role: newRole }),
+      body: { role: newRole },
     });
     notify(`Role pengguna "${username}" berhasil diubah menjadi ${newRole}`);
     await loadUsers();
@@ -536,9 +526,9 @@ const updateUserRole = async (id: number, username: string, newRole: string) => 
 };
 
 const deleteUser = async (id: number, username: string) => {
-  if (!confirm(`Hapus user "${username}" secara permanen? Riwayat tiket perawatan yang terkait akan tetap tersimpan.`)) return;
+  if (!confirm(`Hapus user "${username}" secara permanen? Catatan request miliknya akan tetap aman.`)) return;
   try {
-    await fetchApi(`/api/users/${id}`, {
+    await fetchWithAuth(`/api/users/${id}`, {
       method: 'DELETE',
     });
     notify(`Pengguna "${username}" berhasil dihapus`);
@@ -550,8 +540,9 @@ const deleteUser = async (id: number, username: string) => {
 };
 
 onMounted(() => {
-  initAuth();
   loadRequests();
-  if (user.value?.role === 'admin') loadUsers();
+  if (isAdmin.value) {
+    loadUsers();
+  }
 });
 </script>
